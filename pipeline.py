@@ -1,62 +1,79 @@
 from agents import (
-    build_search_agent,
     build_scrape_agent,
     chat_chain,
     critic_chain
 )
 
+from tavily import TavilyClient
+import os
+import time
+from dotenv import load_dotenv
+
+load_dotenv()
+
+tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+
+
+# -----------------------------
+# Retry Wrapper (IMPORTANT)
+# -----------------------------
+def safe_invoke(chain, payload, retries=3):
+    for i in range(retries):
+        try:
+            return chain.invoke(payload)
+        except Exception as e:
+            print(f"⚠️ Retry {i+1}/{retries} due to: {e}")
+            time.sleep(2)
+    raise Exception("❌ Failed after retries")
+
+
+# -----------------------------
+# MAIN PIPELINE
+# -----------------------------
 def run_pipeline(topic: str) -> dict:
     state = {}
 
     print("\n" + "=" * 60)
-    print("🔍 Starting Search Pipeline")
+    print("🔍 Starting Research Pipeline")
     print("=" * 60)
 
     # -----------------------------
-    # STEP 1: SEARCH AGENT
+    # STEP 1: DIRECT TAVILY SEARCH
     # -----------------------------
-    search_agent = build_search_agent()
+    print("\n🌐 Fetching search results from Tavily...\n")
 
-    search_result = search_agent.invoke({
-        "messages": [
-            {
-                "role": "user",
-                "content": f"Conduct a web search to gather information on the topic: {topic}"
-            }
-        ]
-    })
+    results = tavily.search(query=topic, max_results=5)
 
-    state['search_result'] = search_result['messages'][-1].content
-    print("\n✅ Search Result:\n")
-    print(state['search_result'][:500])
+    urls = [r["url"] for r in results["results"]]
+    state["urls"] = urls
 
+    print("✅ URLs Found:")
+    for url in urls:
+        print(url)
 
     # -----------------------------
-    # STEP 2: SCRAPER AGENT
+    # STEP 2: SCRAPE MULTIPLE URLS
     # -----------------------------
     print("\n" + "=" * 60)
-    print("🌐 Scraper Agent is extracting content")
+    print("📄 Scraping content from URLs")
     print("=" * 60)
 
     scrape_agent = build_scrape_agent()
+    all_content = []
 
-    scraper_result = scrape_agent.invoke({
-        "messages": [
-            {
-                "role": "user",
-                "content": (
-                    f"Based on the search results about '{topic}', "
-                    f"pick the most relevant URL and scrape it for deeper insights.\n\n"
-                    f"Search Results:\n{state['search_result'][:800]}"
-                )
-            }
-        ]
-    })
+    for url in urls:
+        print(f"\n🔗 Scraping: {url}")
 
-    state['scrape_content'] = scraper_result['messages'][-1].content
-    print("\n📄 Scraped Content:\n")
-    print(state['scrape_content'][:500])
+        result = scrape_agent.invoke({
+            "messages": [
+                {"role": "user", "content": f"Scrape this URL: {url}"}
+            ]
+        })
 
+        content = result["messages"][-1].content
+        all_content.append(f"Source: {url}\n{content}\n")
+
+    state["scrape_content"] = "\n\n".join(all_content)
 
     # -----------------------------
     # STEP 3: REPORT GENERATION
@@ -65,33 +82,27 @@ def run_pipeline(topic: str) -> dict:
     print("✍️ Generating Research Report")
     print("=" * 60)
 
-    combined_research = (
-        f"SEARCH RESULTS:\n{state['search_result']}\n\n"
-        f"SCRAPED CONTENT:\n{state['scrape_content']}"
-    )
-
-    state['report'] = chat_chain.invoke({
+    state["report"] = safe_invoke(chat_chain, {
         "topic": topic,
-        "research": combined_research
+        "research": state["scrape_content"]
     })
 
-    print("\n📊 Generated Report:\n")
-    print(state['report'][:1000])
-
+    print("\n📊 REPORT:\n")
+    print(state["report"][:1000])
 
     # -----------------------------
-    # STEP 4: CRITIC AGENT
+    # STEP 4: CRITIC
     # -----------------------------
     print("\n" + "=" * 60)
-    print("🧠 Critic Agent Evaluating Report")
+    print("🧠 Evaluating Report")
     print("=" * 60)
 
-    state['feedback'] = critic_chain.invoke({
-        "report": state['report']
+    state["feedback"] = safe_invoke(critic_chain, {
+        "report": state["report"]
     })
 
-    print("\n📝 Critic Feedback:\n")
-    print(state['feedback'])
+    print("\n📝 CRITIQUE:\n")
+    print(state["feedback"])
 
     return state
 

@@ -1,5 +1,29 @@
 import streamlit as st
 from pipeline import run_pipeline
+import io
+try:
+    from fpdf import FPDF
+except ImportError:
+    st.error("Please install fpdf2 to enable PDF downloads: `pip install fpdf2`")
+
+def generate_pdf(text, title):
+    """Utility function to convert pure text/markdown to a PDF byte stream."""
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    
+    # Adding a Unicode font or falling back to simple latin-1 encoding
+    # We replace unsupported unicode characters since default FPDF fonts don't support all emojis/symbols
+    pdf.set_font("Helvetica", size=16, style="B")
+    pdf.multi_cell(0, 10, txt=title.encode("latin-1", "replace").decode("latin-1"), align="C")
+    pdf.ln(10)
+    
+    pdf.set_font("Helvetica", size=12)
+    # clean up known markdown elements slightly for text format, encode to handle emojis safely
+    clean_text = text.encode("latin-1", "replace").decode("latin-1")
+    pdf.multi_cell(0, 8, txt=clean_text)
+    
+    return pdf.output()
 
 # Configure the Streamlit page
 st.set_page_config(
@@ -97,8 +121,25 @@ if start_btn:
             st.markdown("### Research Report")
             # Wrap report in custom container
             st.markdown("<div class='report-container'>", unsafe_allow_html=True)
-            st.markdown(results.get("report", "*No report generated.*"))
+            report_text = results.get("report", "*No report generated.*")
+            st.markdown(report_text)
             st.markdown("</div>", unsafe_allow_html=True)
+            
+            # Simple line break
+            st.write("")
+            
+            # Option to download report as PDF
+            try:
+                pdf_bytes = generate_pdf(text=report_text, title=f"AI Research Report: {topic}")
+                st.download_button(
+                    label="📄 Download Report as PDF",
+                    data=bytes(pdf_bytes),
+                    file_name=f"{topic.replace(' ', '_')}_Report.pdf",
+                    mime="application/pdf",
+                    type="primary"
+                )
+            except Exception as e:
+                st.warning(f"Could not generate PDF: {e}")
 
         with tab2:
             st.markdown("### AI Critic Evaluation")

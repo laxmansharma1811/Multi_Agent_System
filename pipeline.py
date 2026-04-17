@@ -58,20 +58,19 @@ def run_pipeline(topic: str) -> dict:
     print("📄 Scraping content from URLs")
     print("=" * 60)
 
-    scrape_agent = build_scrape_agent()
+    # We don't need a LangChain Agent just to execute a Python tool directly
+    from tools import scrape_url
     all_content = []
 
     for url in urls:
         print(f"\n🔗 Scraping: {url}")
-
-        result = scrape_agent.invoke({
-            "messages": [
-                {"role": "user", "content": f"Scrape this URL: {url}"}
-            ]
-        })
-
-        content = result["messages"][-1].content
-        all_content.append(f"Source: {url}\n{content}\n")
+        
+        try:
+            # Call the tool directly instead of using an LLM to decide to use the tool
+            content = scrape_url.invoke(url)
+            all_content.append(f"Source: {url}\n{content}\n")
+        except Exception as e:
+            print(f"⚠️ Failed to scrape {url}: {e}")
 
     state["scrape_content"] = "\n\n".join(all_content)
 
@@ -82,9 +81,16 @@ def run_pipeline(topic: str) -> dict:
     print("✍️ Generating Research Report")
     print("=" * 60)
 
+    # Cut down the scraped content drastically to save on tokens
+    # Google's free tier token per minute limit gets destroyed if we pass 5 full webpages
+    truncated_content = state["scrape_content"][:1000] # Super strict limiting to ~2.5k tokens max
+
+    print("⏳ Waiting 30 seconds before report generation to reset token count...")
+    time.sleep(30)
+
     state["report"] = safe_invoke(chat_chain, {
         "topic": topic,
-        "research": state["scrape_content"]
+        "research": truncated_content
     })
 
     print("\n📊 REPORT:\n")
@@ -96,6 +102,9 @@ def run_pipeline(topic: str) -> dict:
     print("\n" + "=" * 60)
     print("🧠 Evaluating Report")
     print("=" * 60)
+
+    print("⏳ Waiting 15 seconds before evaluation...")
+    time.sleep(15)
 
     state["feedback"] = safe_invoke(critic_chain, {
         "report": state["report"]

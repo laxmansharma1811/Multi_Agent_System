@@ -8,7 +8,7 @@ import os
 
 load_dotenv()
 
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.3, api_key=os.getenv('GEMINI_API_KEY'))
+llm = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0.3, api_key=os.getenv('GEMINI_API_KEY'))
 
 def build_search_agent():
     return create_agent(
